@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#12121c">
+  <link rel="manifest" href="manifest.webmanifest">
+  <title>Panel to Motion</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🎬 Panel to Motion</h1>
+    <p>Planche BD → vidéo animée, en 3 étapes</p>
+  </header>
+
+  <main>
+    <!-- Étape 1 : Importer -->
+    <section id="step1" class="step">
+      <h2>1 · Importer</h2>
+      <div class="form-row">
+        <label>Titre du projet</label>
+        <input id="project-title" type="text" placeholder="Ex : Marlo 4Barres — épisode 1">
+      </div>
+      <div class="form-row">
+        <label>Sens de lecture</label>
+        <select id="project-reading">
+          <option value="western">Occidental (gauche → droite)</option>
+          <option value="manga">Manga (droite → gauche)</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Format vidéo</label>
+        <select id="project-format">
+          <option value="9:16">9:16 (vertical, mobile)</option>
+          <option value="16:9">16:9 (paysage)</option>
+          <option value="1:1">1:1 (carré)</option>
+        </select>
+      </div>
+      <div id="dropzone" class="dropzone">
+        <p>Glissez vos planches ici (JPG, PNG, WebP, PDF)</p>
+        <p class="hint">ou</p>
+        <button id="pick-files" class="btn">Choisir des fichiers</button>
+        <input id="file-input" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" multiple hidden>
+      </div>
+      <ul id="imported-list" class="imported-list"></ul>
+      <button id="analyze-btn" class="btn primary" disabled>Analyser la planche</button>
+      <p id="analyze-status" class="status"></p>
+    </section>
+
+    <!-- Étape 2 : Vérifier -->
+    <section id="step2" class="step hidden">
+      <h2>2 · Vérifier</h2>
+      <div class="scene-summary">
+        <span id="scene-count">0 scène</span>
+        <span id="total-estimate">durée estimée : 0 s</span>
+        <span id="target-hint"></span>
+      </div>
+      <div id="storyboard" class="storyboard"></div>
+      <div class="toolbar">
+        <button id="add-scene" class="btn">+ Ajouter une scène</button>
+        <button id="go-generate" class="btn primary">3 · Générer →</button>
+      </div>
+    </section>
+
+    <!-- Étape 3 : Générer -->
+    <section id="step3" class="step hidden">
+      <h2>3 · Générer</h2>
+      <div class="form-row">
+        <label>Musique (optionnel)</label>
+        <input id="music-input" type="file" accept="audio/*">
+        <button id="music-remove" class="btn small" hidden>Retirer la musique</button>
+      </div>
+      <button id="generate-btn" class="btn primary big">Générer la vidéo</button>
+      <div id="generate-progress" class="progress hidden">
+        <p id="progress-label"></p>
+        <div class="bar"><div id="progress-bar"></div></div>
+      </div>
+      <p id="generate-status" class="status"></p>
+      <div id="result" class="result hidden">
+        <video id="final-video" controls playsinline></video>
+        <div class="downloads">
+          <a id="dl-final" class="btn">⬇ Vidéo finale (MP4)</a>
+          <a id="dl-srt" class="btn">⬇ Sous-titres (SRT)</a>
+        </div>
+        <div class="toolbar">
+          <button id="assemble-again" class="btn">Remonter sans refaire les scènes</button>
+          <button id="back-step2" class="btn">← Retour au storyboard</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
