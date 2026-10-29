@@ -221,7 +221,10 @@ export async function analyzePage(file, reading = 'western') {
   if (clean.length === 0) clean.push({ x: 0, y: 0, w: g.width, h: g.height });
 
   const bubbles = await detectBubbles(file, g);
-  const worker = await createWorker('fra');
+  await ensureOcrLanguage();
+  // Sans errorHandler, tesseract.js leve une erreur hors de la chaine de promesses
+  // et fait tomber le serveur entier.
+  const worker = await createWorker('fra', 1, { errorHandler: () => {} });
 
   const scenes = [];
   const usedBubbles = new Set();
@@ -255,6 +258,23 @@ export async function analyzePage(file, reading = 'western') {
   }
   await worker.terminate();
   return scenes;
+}
+
+// Donnees de langue telechargees par tesseract.js au premier usage. On verifie
+// l'acces avant, avec un delai borne, pour echouer clairement au lieu de bloquer.
+const OCR_LANG_URL =
+  'https://cdn.jsdelivr.net/npm/@tesseract.js-data/fra/4.0.0_best_int/fra.traineddata.gz';
+
+async function ensureOcrLanguage() {
+  try {
+    const res = await fetch(OCR_LANG_URL, { method: 'HEAD', signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (e) {
+    throw new Error(
+      `OCR indisponible : donnees de langue francaises inaccessibles (${e.message || e}). ` +
+        'Verifier la connexion Internet du serveur.'
+    );
+  }
 }
 
 function rectToFractions(rect, g) {
