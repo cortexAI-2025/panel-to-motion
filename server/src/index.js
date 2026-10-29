@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import apiRouter from './routes/api.js';
+import { api as apiRouter } from './routes/api.js';
 import { markInterruptedOnBoot } from './store.js';
 
 // Les jobs d'une session precedente ne tournent plus : marquer resumables.

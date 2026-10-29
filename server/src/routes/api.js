@@ -123,7 +123,10 @@ api.post('/projects/:id/images', requireProject, (req, res) => {
         }
         fs.rmSync(file.path, { force: true });
       } else {
-        added.push(await addImage(p, file.path, file.filename));
+        const dest = path.join(projectSourceDir(p.id), file.filename);
+        fs.copyFileSync(file.path, dest);
+        fs.rmSync(file.path, { force: true });
+        added.push(await addImage(p, dest, file.filename));
       }
     }
     saveProject(p);
