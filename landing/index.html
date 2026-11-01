@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Panel to Motion — vos planches de BD en vidéo</title>
+<meta name="description" content="Importez une planche de bande dessinée : Panel to Motion détecte les cases, lit les bulles, fait parler les personnages et exporte une vidéo MP4 d'environ 60 secondes.">
+<meta name="theme-color" content="#0b0a09">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0a09'/%3E%3Crect x='7' y='7' width='11' height='18' fill='%23efe9da'/%3E%3Crect x='21' y='7' width='4' height='18' fill='%23ff4b1f'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Instrument+Serif:ital@1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+html,body{background:#0b0a09}
+:root{
+  --ink:#0b0a09; --ink2:#14120f; --ink3:#1b1815;
+  --paper:#efe9da; --mute:rgba(239,233,218,.64); --dim:rgba(239,233,218,.42); --line:rgba(239,233,218,.14);
+  --acc:#ff4b1f;
+  --ease:cubic-bezier(.2,.7,.2,1);
+  --display:"Anton","Impact","Haettenschweiler",sans-serif;
+  --serif:"Instrument Serif","Times New Roman",Georgia,serif;
+  --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{font-family:var(--mono);font-size:15px;line-height:1.65;color:var(--paper);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+::selection{background:var(--acc);color:var(--ink)}
+svg{display:block}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--acc);outline-offset:3px;border-radius:4px}
+body::before{content:"";position:fixed;inset:0;z-index:100;pointer-events:none;opacity:.07;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+/* ---------- shared type ---------- */
+.label{font:500 11px/1.2 var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--dim)}
+.disp{font-family:var(--display);font-weight:400;text-transform:uppercase;letter-spacing:-.005em;line-height:.92}
+.disp em,.serif{font-family:var(--serif);font-style:italic;text-transform:none;font-weight:400;letter-spacing:-.01em}
+.disp em{font-size:1.12em;color:#b8af9d}
+.wrap{max-width:1440px;margin:0 auto;padding-left:clamp(20px,4vw,56px);padding-right:clamp(20px,4vw,56px)}
+.pill{display:inline-flex;align-items:center;gap:10px;height:48px;padding:0 24px;border-radius:999px;font:500 13px/1 var(--mono);letter-spacing:.04em;white-space:nowrap;transition:transform .35s var(--ease),background .3s,color .3s,box-shadow .3s}
+.pill svg{width:16px;height:16px;transition:transform .35s var(--ease)}
+.pill:hover svg{transform:translateX(4px)}
+.pill.fill{background:var(--acc);color:var(--ink);box-shadow:0 0 0 0 rgba(255,75,31,.0)}
+.pill.fill:hover{transform:translateY(-2px);box-shadow:5px 6px 0 rgba(239,233,218,.9)}
+.pill.ghost{color:var(--paper);box-shadow:inset 0 0 0 1px rgba(239,233,218,.28)}
+.pill.ghost:hover{background:rgba(239,233,218,.08)}
+
+/* ---------- load choreography (CSS only: never leaves a blank page) ---------- */
+@keyframes rise{from{opacity:0;transform:translateY(26px);filter:blur(10px)}to{opacity:1;transform:none;filter:none}}
+.rise{animation:rise 1s var(--ease) both;animation-delay:var(--d,0s)}
+.js .rv{opacity:0;transform:translateY(28px);filter:blur(8px);transition:opacity .9s var(--ease),transform .9s var(--ease),filter .9s var(--ease);transition-delay:var(--d,0s)}
+.js .rv.in{opacity:1;transform:none;filter:none}
+
+/* ---------- nav ---------- */
+.nav{position:fixed;z-index:50;top:16px;left:50%;transform:translateX(-50%);width:min(960px,calc(100% - 32px));
+  display:flex;align-items:center;justify-content:space-between;gap:16px;height:56px;padding:0 8px 0 20px;border-radius:999px;
+  background:rgba(14,12,10,.82);-webkit-backdrop-filter:blur(16px) saturate(1.4);backdrop-filter:blur(16px) saturate(1.4);
+  box-shadow:inset 0 0 0 1px rgba(239,233,218,.12),0 10px 30px rgba(0,0,0,.35)}
+.brand{display:flex;align-items:center;gap:10px;font:400 19px/1 var(--display);text-transform:uppercase;letter-spacing:.01em}
+.brand svg{width:22px;height:22px}
+.nav ul{display:flex;gap:28px;list-style:none}
+.nav ul a{font:500 12px/1 var(--mono);letter-spacing:.08em;color:var(--mute);transition:color .25s}
+.nav ul a:hover{color:var(--paper)}
+.nav .pill{height:40px;padding:0 18px;font-size:12px}
+
+/* ---------- hero ---------- */
+.hero{position:relative;min-height:100svh;display:grid;grid-template-columns:minmax(0,1.04fr) minmax(0,.96fr);align-items:center;gap:clamp(16px,3vw,48px);padding-top:112px;padding-bottom:72px}
+.hero h1{font-size:clamp(54px,7.3vw,122px);margin:22px 0 28px}
+.hero h1 span{display:block;white-space:nowrap}
+.hero p.lead{max-width:34rem;color:var(--mute);font-size:clamp(14px,1.15vw,16px)}
+.cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:36px}
+.hero .meta{margin-top:44px;display:flex;gap:22px;flex-wrap:wrap}
+.hero .meta span{display:inline-flex;align-items:center;gap:8px}
+.hero .meta span::before{content:"";width:5px;height:5px;background:var(--acc);border-radius:50%}
+.vis{position:relative;width:min(100%,600px);aspect-ratio:600/664;margin-left:auto;perspective:1600px;
+  --px:0;--py:0}
+.pageWrap{position:absolute;left:0;top:0;width:72%;aspect-ratio:3/4;transform-style:preserve-3d;
+  transform:rotateY(calc(-11deg + var(--px) * 5deg)) rotateX(calc(4deg + var(--py) * -4deg)) rotateZ(1.2deg);
+  transition:transform .5s var(--ease)}
+.page{position:relative;width:100%;height:100%;background:var(--paper);overflow:hidden;
+  box-shadow:14px 16px 0 rgba(239,233,218,.07),0 50px 90px rgba(0,0,0,.65)}
+.page svg{width:100%;height:100%}
+.phone{position:absolute;right:0;bottom:0;width:37%;aspect-ratio:9/16;border-radius:26px;overflow:hidden;background:var(--paper);
+  box-shadow:0 0 0 6px #070605,0 0 0 7px rgba(239,233,218,.22),0 40px 80px rgba(0,0,0,.7);
+  transform:translateZ(60px) rotateZ(-1.5deg)}
+.phone svg{width:100%;height:100%}
+.hud{position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;gap:6px;padding:14px 12px 0;font:500 clamp(7px,.7vw,9.5px)/1 var(--mono);letter-spacing:.1em;white-space:nowrap;color:var(--paper);text-shadow:0 1px 6px rgba(0,0,0,.7)}
+.hud b{display:inline-flex;align-items:center;gap:6px;font-weight:500}
+.hud b::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--acc);animation:blink 1.2s steps(2) infinite}
+@keyframes blink{50%{opacity:.15}}
+.sub{position:absolute;left:0;right:0;bottom:0;padding:44px 14px 16px;background:linear-gradient(180deg,transparent,rgba(11,10,9,.88) 70%);text-align:center}
+.sub small{display:block;font:500 8.5px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--acc);margin-bottom:6px}
+.sub p{font:500 12px/1.35 var(--mono);color:var(--paper);opacity:0;transform:translateY(6px);transition:opacity .45s,transform .45s var(--ease)}
+.sub.show p{opacity:1;transform:none}
+.prog{position:absolute;left:0;bottom:0;height:3px;width:100%;background:rgba(239,233,218,.18)}
+.prog i{display:block;height:100%;width:0;background:var(--acc)}
+.tag{position:absolute;left:-10px;bottom:-14px;z-index:3;font:500 10px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;background:var(--ink);padding:8px 12px;box-shadow:inset 0 0 0 1px var(--line);color:var(--mute);transform:rotate(-2deg)}
+.tag i{font-style:normal;color:var(--acc)}
+
+/* ---------- marquee ---------- */
+.marq{border-block:1px solid var(--line);overflow:hidden;padding:18px 0;background:var(--ink2)}
+.marq .track{display:flex;width:max-content;animation:marq 42s linear infinite}
+.marq span{display:inline-flex;align-items:center;font:500 12px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--mute);padding-right:44px;white-space:nowrap}
+.marq span::after{content:"";width:6px;height:6px;margin-left:44px;background:var(--acc);transform:rotate(45deg)}
+@keyframes marq{to{transform:translateX(-50%)}}
+
+/* ---------- stats ---------- */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line)}
+.stats div{padding:48px 0 44px;padding-left:clamp(16px,2.4vw,36px);border-left:1px solid var(--line)}
+.stats div:first-child{border-left:0;padding-left:0}
+.stats b{display:block;font:400 clamp(48px,6vw,92px)/.95 var(--display);letter-spacing:-.01em}
+.stats b sup{font:italic 400 .42em/1 var(--serif);color:var(--dim);margin-left:4px;vertical-align:top;position:relative;top:.2em}
+.stats p{margin-top:12px;color:var(--mute);font-size:13px;max-width:18rem}
+
+/* ---------- pinned journey ---------- */
+.journey{padding-top:clamp(90px,12vw,180px)}
+.journey>.wrap>header{max-width:46rem;margin-bottom:clamp(40px,6vw,88px)}
+.journey h2,.sect h2{font-size:clamp(46px,6.2vw,104px);margin-top:20px}
+.pin{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:clamp(24px,4vw,72px);align-items:start}
+.steps{padding-bottom:12vh}
+.step{min-height:82vh;display:flex;flex-direction:column;justify-content:center;opacity:.28;transition:opacity .6s}
+.step.on{opacity:1}
+.step .n{font:400 clamp(70px,9vw,148px)/.8 var(--display);color:transparent;-webkit-text-stroke:1.5px rgba(239,233,218,.5);transition:-webkit-text-stroke-color .5s,color .5s}
+.step.on .n{-webkit-text-stroke-color:var(--acc)}
+.step h3{font-size:clamp(38px,4.4vw,70px);margin:22px 0 18px}
+.step p{color:var(--mute);max-width:32rem}
+.step ul{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin-top:24px}
+.step li{font:500 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;padding:9px 12px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--line);color:var(--mute)}
+.stage{position:sticky;top:96px;height:min(76vh,660px);border-radius:28px;background:var(--ink2);overflow:hidden;box-shadow:inset 0 0 0 1px var(--line),0 40px 90px rgba(0,0,0,.45)}
+.stage::before{content:"";position:absolute;inset:0;background:radial-gradient(60% 50% at 50% 40%,rgba(239,233,218,.06),transparent 70%);pointer-events:none}
+.stage .rail{position:absolute;z-index:4;left:22px;top:20px;right:22px;display:flex;gap:6px}
+.rail i{flex:1;height:3px;background:rgba(239,233,218,.16);overflow:hidden;position:relative}
+.rail i::after{content:"";position:absolute;inset:0;background:var(--acc);transform:scaleX(0);transform-origin:left;transition:transform .8s var(--ease)}
+.rail i.on::after{transform:none}
+.stage .cap{position:absolute;z-index:4;left:22px;bottom:18px;right:22px;display:flex;justify-content:space-between}
+.s{position:absolute;inset:0;opacity:0;transition:opacity .6s;pointer-events:none}
+.s.on{opacity:1}
+/* scene 1 */
+.s0 .pg{position:absolute;left:50%;top:50%;height:76%;aspect-ratio:3/4;transform:translate(-50%,-50%) rotate(-2deg);background:var(--paper);overflow:hidden;box-shadow:0 0 0 1px rgba(239,233,218,.3),0 30px 60px rgba(0,0,0,.5)}
+.s0 .pg svg{width:100%;height:100%}
+.scan{position:absolute;left:0;right:0;top:0;height:3px;background:var(--acc);box-shadow:0 0 18px 3px rgba(255,75,31,.55);animation:scan 3.2s ease-in-out infinite;animation-play-state:paused}
+.s.on .scan{animation-play-state:running}
+@keyframes scan{0%{top:0}50%{top:calc(100% - 3px)}100%{top:0}}
+.chip{position:absolute;font:500 11px/1 var(--mono);letter-spacing:.06em;padding:10px 14px;border-radius:10px;background:var(--ink3);box-shadow:inset 0 0 0 1px rgba(239,233,218,.22);opacity:0;transform:translateX(var(--fx,-40px));transition:transform 1s var(--ease) var(--d,0s),opacity .7s var(--d,0s)}
+.chip i{font-style:normal;color:var(--acc);margin-right:8px}
+.s.on .chip{opacity:1;transform:none}
+/* scene 2 */
+.s1{display:grid;grid-template-columns:auto minmax(0,1fr);gap:clamp(16px,2.4vw,32px);align-items:center;padding:52px 26px 50px}
+.s1 .pg{height:min(100%,calc(100svh - 280px));aspect-ratio:3/4;justify-self:start;background:var(--paper);box-shadow:0 0 0 1px rgba(239,233,218,.3),0 30px 60px rgba(0,0,0,.5);position:relative}
+.s1 .pg svg{width:100%;height:100%}
+.ov rect{fill:none;stroke:var(--acc);stroke-width:4;stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset 1.1s var(--ease) var(--d,0s)}
+.ov .bub{stroke:#0b0a09;stroke-width:2.5;stroke-dasharray:6 5;stroke-dashoffset:0;fill:rgba(255,75,31,.18);opacity:0;transition:opacity .6s var(--d,0s)}
+.s.on .ov rect:not(.bub){stroke-dashoffset:0}
+.s.on .ov .bub{opacity:1}
+.bd{transform-box:fill-box;transform-origin:center;transform:scale(0);transition:transform .6s var(--ease) var(--d,0s)}
+.s.on .bd{transform:scale(1)}
+.list{display:flex;flex-direction:column;gap:10px}
+.row{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:12px 14px;border-radius:12px;background:var(--ink3);box-shadow:inset 0 0 0 1px var(--line);opacity:0;transform:translateX(18px);transition:opacity .6s var(--d,0s),transform .8s var(--ease) var(--d,0s)}
+.s.on .row{opacity:1;transform:none}
+.row b{font:400 22px/1 var(--display);color:var(--acc)}
+.row span{font-size:12px;line-height:1.35;color:var(--paper)}
+.row span small{display:block;font:500 9px/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin-bottom:5px}
+.row em{font:500 10px/1 var(--mono);font-style:normal;color:var(--mute);letter-spacing:.08em}
+.row::after{content:none}
+/* scene 3 */
+.s2{display:grid;grid-template-columns:auto minmax(0,1fr);gap:clamp(18px,3vw,40px);align-items:center;padding:56px 28px 54px}
+.s2 .ph{height:min(100%,calc(100svh - 280px));aspect-ratio:9/16;border-radius:22px;overflow:hidden;position:relative;background:var(--paper);box-shadow:0 0 0 5px #070605,0 0 0 6px rgba(239,233,218,.22),0 30px 60px rgba(0,0,0,.55)}
+.s2 .ph svg{width:100%;height:100%}
+.jobs{display:flex;flex-direction:column;gap:16px}
+.job{display:grid;gap:8px}
+.job div{display:flex;justify-content:space-between;gap:10px;font:500 11px/1.3 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--mute);white-space:nowrap}
+.job div em{font-style:normal;color:var(--paper)}
+.bar{height:6px;background:rgba(239,233,218,.14);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width 1.6s var(--ease) var(--d,0s)}
+.s.on .bar i{width:100%}
+.done{margin-top:6px;display:flex;align-items:center;gap:10px;padding:14px 16px;border-radius:12px;background:var(--paper);color:var(--ink);font:500 12px/1.3 var(--mono);opacity:0;transform:translateY(10px);transition:opacity .6s 2.8s,transform .8s var(--ease) 2.8s}
+.done svg{width:18px;height:18px;flex:none}
+.s.on .done{opacity:1;transform:none}
+
+/* ---------- features list ---------- */
+.sect{padding-top:clamp(90px,12vw,180px)}
+.feat{margin-top:clamp(36px,5vw,72px);border-top:1px solid var(--line)}
+.fr{position:relative;display:grid;grid-template-columns:70px minmax(0,1fr) minmax(0,1.15fr) 150px;gap:clamp(12px,3vw,48px);align-items:center;padding:34px 0;border-bottom:1px solid var(--line);transition:padding .5s var(--ease)}
+.fr::before{content:"";position:absolute;left:0;bottom:-1px;height:1px;width:100%;background:var(--acc);transform:scaleX(0);transform-origin:left;transition:transform .7s var(--ease)}
+.fr:hover::before{transform:none}
+.fr:hover{padding-left:14px}
+.fr .i{font:500 12px/1 var(--mono);color:var(--acc);letter-spacing:.14em}
+.fr h3{font:400 clamp(30px,3.4vw,54px)/.95 var(--display);text-transform:uppercase}
+.fr p{color:var(--mute);max-width:36rem}
+.fr .t{font:500 10.5px/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--dim);white-space:nowrap;text-align:right}
+
+/* ---------- formats ---------- */
+.fmts{display:flex;align-items:flex-end;justify-content:center;gap:clamp(18px,4vw,64px);margin-top:clamp(40px,6vw,88px);flex-wrap:wrap}
+.fm{display:flex;flex-direction:column;gap:16px}
+.fm .fr9{height:clamp(300px,34vw,470px);aspect-ratio:9/16}
+.fm .fr16{width:clamp(280px,36vw,520px);aspect-ratio:16/9}
+.fm .fr1{width:clamp(220px,25vw,340px);aspect-ratio:1/1}
+.fm .scr{border-radius:14px;overflow:hidden;background:var(--paper);box-shadow:0 0 0 1px rgba(239,233,218,.28),10px 12px 0 rgba(239,233,218,.06),0 30px 60px rgba(0,0,0,.5)}
+.fm .scr svg{width:100%;height:100%}
+.fm figcaption{display:flex;justify-content:space-between;gap:12px}
+.fm figcaption b{font:400 28px/1 var(--display);letter-spacing:.01em}
+.fm figcaption span{color:var(--mute);font-size:12px;align-self:center}
+.fnote{margin:clamp(36px,5vw,64px) auto 0;max-width:40rem;text-align:center;color:var(--mute)}
+
+/* ---------- honest (paper) ---------- */
+.paper{background:var(--paper);color:var(--ink);margin-top:clamp(90px,12vw,180px);padding:clamp(70px,9vw,140px) 0}
+.paper .label{color:rgba(11,10,9,.55)}
+.paper h2 em{color:rgba(11,10,9,.5)}
+.cols{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:clamp(36px,5vw,72px);border-top:2px solid var(--ink)}
+.col{padding:30px clamp(16px,2.4vw,34px) 10px;border-left:1px solid rgba(11,10,9,.2)}
+.col:first-child{border-left:0;padding-left:0}
+.col h3{font:400 clamp(26px,2.6vw,40px)/1 var(--display);text-transform:uppercase;margin:14px 0 22px}
+.col ul{list-style:none;display:grid;gap:14px}
+.col li{display:grid;grid-template-columns:18px 1fr;gap:10px;font-size:14px;line-height:1.5;color:rgba(11,10,9,.82)}
+.col li svg{width:16px;height:16px;margin-top:3px}
+.col li code{font:500 12px var(--mono);background:rgba(11,10,9,.08);padding:1px 6px;border-radius:5px}
+.col.k h3{color:var(--ink)}
+.col.k li svg{color:var(--acc)}
+.col.o li svg,.col.t li svg{color:rgba(11,10,9,.5)}
+
+/* ---------- install ---------- */
+.install{padding-top:clamp(90px,12vw,180px);padding-bottom:clamp(60px,8vw,110px)}
+.install h2{font-size:clamp(50px,8.4vw,150px);margin-top:22px}
+.install h2 span{display:block}
+.term{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:clamp(40px,6vw,80px)}
+.box{border-radius:18px;background:var(--ink2);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden}
+.box header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+.box header button{font:500 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--mute);background:none;border:0;cursor:pointer;padding:8px 12px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--line);transition:color .2s,background .2s}
+.box header button:hover{color:var(--paper);background:rgba(239,233,218,.08)}
+.box pre{padding:22px 20px;font:400 14px/1.9 var(--mono);color:var(--paper);overflow-x:auto;white-space:pre}
+.box pre i{font-style:normal;color:var(--acc);user-select:none}
+.box pre u{text-decoration:none;color:var(--dim)}
+.box p{padding:0 20px 20px;color:var(--mute);font-size:12.5px}
+.foot{margin-top:clamp(70px,9vw,120px);padding-top:28px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;color:var(--dim);font-size:12px}
+
+/* ---------- responsive ---------- */
+@media (max-width:1020px){
+  .hero{grid-template-columns:1fr;padding-top:104px;gap:36px}
+  .vis{margin:0 auto;width:min(100%,520px)}
+  .nav ul{display:none}
+  .stats{grid-template-columns:1fr 1fr}
+  .stats div:nth-child(3){border-left:0;padding-left:0}
+  .stats div:nth-child(n+3){border-top:1px solid var(--line)}
+  .fr{grid-template-columns:44px 1fr;row-gap:12px}
+  .fr p{grid-column:2}.fr .t{grid-column:2;text-align:left}
+  .cols{grid-template-columns:1fr}
+  .col{border-left:0;border-top:1px solid rgba(11,10,9,.2);padding-left:0}
+  .col:first-child{border-top:0}
+  .term{grid-template-columns:1fr}
+}
+@media (max-width:860px){
+  .pin{grid-template-columns:1fr;gap:0}
+  .stage{position:sticky;top:84px;height:48svh;min-height:300px;z-index:5;order:-1;margin-bottom:8px;box-shadow:inset 0 0 0 1px var(--line),0 0 0 12px var(--ink)}
+  .step{min-height:64svh}
+  .s1{display:block;padding:0}
+  .s1 .pg{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);height:calc(100% - 96px)}
+  .s1 .list{display:none}
+  .step{justify-content:flex-start;padding-top:28px}
+  .s2{grid-template-columns:auto 1fr;gap:16px;padding:46px 16px 40px}
+  .jobs{gap:12px}.job div{font-size:10px;letter-spacing:.08em}.done{display:none}
+  .stage .cap{display:none}
+  .chip{font-size:10px;padding:8px 10px}
+  .fm .fr9{height:clamp(260px,70vw,400px)}
+}
+@media (max-width:560px){
+  .hero h1{font-size:clamp(46px,14.2vw,72px)}
+  .hero h1 span{white-space:normal}
+  .cta .pill{flex:1 1 100%;justify-content:center}
+  .nav{padding-left:16px}
+  .stats b{font-size:clamp(44px,13vw,64px)}
+  .fm{width:100%;align-items:center}
+  .fm .fr16{width:100%}.fm .fr1{width:min(100%,320px)}
+  .fm figcaption{width:100%}
+  .tag{left:0}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .rise,.js .rv{animation:none;opacity:1;transform:none;filter:none;transition:none}
+  .marq .track{animation:none}
+  .scan,.hud b::before{animation:none}
+  .chip,.row,.bd,.ov rect,.bar i,.done{transition:none}
+}
+</style>
+</head>
+<body>
+
+<!-- Shared comic page: drawn once, reused by every preview via <use> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <pattern id="ht" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(30)"><circle cx="3" cy="3" r="1.3" fill="#efe9da"/></pattern>
+    <pattern id="htInk" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(30)"><circle cx="3" cy="3" r="1.45" fill="#0b0a09"/></pattern>
+    <clipPath id="c1"><rect x="16" y="16" width="568" height="236"/></clipPath>
+    <clipPath id="c2"><rect x="16" y="266" width="318" height="282"/></clipPath>
+    <clipPath id="c3"><rect x="348" y="266" width="236" height="282"/></clipPath>
+    <clipPath id="c4"><rect x="16" y="562" width="568" height="222"/></clipPath>
+
+    <g id="pageG">
+      <rect width="600" height="800" fill="#efe9da"/>
+
+      <!-- PANEL 1 : la ville -->
+      <g clip-path="url(#c1)">
+        <rect x="16" y="16" width="568" height="236" fill="#12100e"/>
+        <rect x="16" y="16" width="568" height="170" fill="url(#ht)" opacity=".16"/>
+        <g fill="#efe9da">
+          <circle cx="60" cy="40" r="1.4"/><circle cx="110" cy="72" r="1.2"/><circle cx="152" cy="34" r="1.6"/><circle cx="214" cy="92" r="1.2"/>
+          <circle cx="262" cy="50" r="1.4"/><circle cx="318" cy="32" r="1.2"/><circle cx="356" cy="78" r="1.6"/><circle cx="404" cy="42" r="1.2"/>
+          <circle cx="548" cy="52" r="1.4"/><circle cx="572" cy="104" r="1.2"/><circle cx="38" cy="112" r="1.3"/><circle cx="184" cy="132" r="1.2"/><circle cx="300" cy="104" r="1.2"/>
+        </g>
+        <circle cx="474" cy="84" r="36" fill="#efe9da"/>
+        <circle cx="461" cy="75" r="6" fill="#d6cfbc"/><circle cx="486" cy="98" r="9" fill="#d6cfbc"/><circle cx="488" cy="68" r="4" fill="#d6cfbc"/>
+        <path fill="#2a2622" d="M16 252 V170 h30 v-24 h26 v30 h24 v-52 h22 v52 h30 v-18 h28 v40 h26 v-66 h20 v66 h34 v-30 h30 v20 h26 v-46 h22 v46 h36 v-20 h28 v32 h30 v-60 h22 v60 h32 h40 v-30 h30 v20 h32 V252 Z"/>
+        <path fill="#070605" d="M16 252 V206 h44 v-30 h34 v30 h28 v-40 h30 v40 h46 v-22 h38 v22 h40 v-50 h28 v50 h52 v-26 h36 v26 h30 v-36 h26 v36 h40 v-18 h40 v18 h56 V252 Z"/>
+        <g fill="#efe9da" opacity=".92">
+          <rect x="66" y="184" width="5" height="7"/><rect x="78" y="184" width="5" height="7"/><rect x="72" y="197" width="5" height="7"/>
+          <rect x="130" y="176" width="5" height="7"/><rect x="128" y="198" width="5" height="7"/>
+          <rect x="284" y="166" width="5" height="7"/><rect x="286" y="190" width="5" height="7"/><rect x="296" y="200" width="5" height="7"/>
+          <rect x="366" y="190" width="5" height="7"/><rect x="378" y="200" width="5" height="7"/>
+          <rect x="430" y="180" width="5" height="7"/><rect x="438" y="192" width="5" height="7"/>
+          <rect x="204" y="194" width="5" height="7"/><rect x="224" y="200" width="5" height="7"/><rect x="496" y="198" width="5" height="7"/>
+        </g>
+        <rect x="140" y="188" width="6" height="8" fill="#ff4b1f"/>
+        <rect x="294" y="178" width="6" height="8" fill="#ff4b1f"/>
+        <rect x="32" y="30" width="238" height="46" fill="#efe9da" stroke="#0b0a09" stroke-width="3"/>
+        <text x="44" y="50" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="500" fill="#0b0a09">MINUIT.</text>
+        <text x="44" y="67" font-family="JetBrains Mono, monospace" font-size="12" fill="#0b0a09">La ville retient son souffle.</text>
+      </g>
+      <rect x="16" y="16" width="568" height="236" fill="none" stroke="#0b0a09" stroke-width="5"/>
+
+      <!-- PANEL 2 : le toit -->
+      <g clip-path="url(#c2)">
+        <rect x="16" y="266" width="318" height="282" fill="#efe9da"/>
+        <rect x="16" y="440" width="318" height="108" fill="url(#htInk)" opacity=".28"/>
+        <circle cx="252" cy="362" r="88" fill="url(#htInk)" opacity=".5" stroke="#0b0a09" stroke-width="3"/>
+        <rect x="16" y="520" width="318" height="28" fill="#0b0a09"/>
+        <rect x="16" y="500" width="318" height="5" fill="#0b0a09"/>
+        <g fill="#0b0a09"><rect x="40" y="500" width="5" height="22"/><rect x="120" y="500" width="5" height="22"/><rect x="200" y="500" width="5" height="22"/><rect x="280" y="500" width="5" height="22"/></g>
+        <path fill="#0b0a09" d="M112 396 Q130 386 150 396 L166 521 L94 521 Z"/>
+        <circle cx="131" cy="374" r="16" fill="#0b0a09"/>
+        <path fill="#0b0a09" d="M118 388 Q82 388 60 420 Q86 410 112 406 Z"/>
+        <path fill="#0b0a09" d="M150 410 Q176 424 190 446 L180 452 Q164 436 146 428 Z"/>
+        <path d="M212 340 L190 376 L242 342 Z" fill="#efe9da" stroke="#0b0a09" stroke-width="3" stroke-linejoin="round"/>
+        <rect x="186" y="284" width="140" height="60" rx="24" fill="#efe9da" stroke="#0b0a09" stroke-width="3"/>
+        <text x="256" y="311" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="500" fill="#0b0a09">Tu l’as vu,</text>
+        <text x="256" y="329" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="500" fill="#0b0a09">toi aussi ?</text>
+      </g>
+      <rect x="16" y="266" width="318" height="282" fill="none" stroke="#0b0a09" stroke-width="5"/>
+
+      <!-- PANEL 3 : le regard -->
+      <g clip-path="url(#c3)">
+        <rect x="348" y="266" width="236" height="282" fill="#efe9da"/>
+        <rect x="348" y="430" width="236" height="118" fill="url(#htInk)" opacity=".3"/>
+        <g id="speed" stroke="#0b0a09" stroke-width="1.5" opacity=".6"></g>
+        <path d="M382 372 Q420 350 462 368" fill="none" stroke="#0b0a09" stroke-width="9" stroke-linecap="round"/>
+        <path d="M470 368 Q512 350 550 372" fill="none" stroke="#0b0a09" stroke-width="9" stroke-linecap="round"/>
+        <path d="M388 402 Q424 372 460 402 Q424 432 388 402 Z" fill="#efe9da" stroke="#0b0a09" stroke-width="4.5" stroke-linejoin="round"/>
+        <path d="M474 402 Q510 372 546 402 Q510 432 474 402 Z" fill="#efe9da" stroke="#0b0a09" stroke-width="4.5" stroke-linejoin="round"/>
+        <circle cx="428" cy="402" r="15" fill="#0b0a09"/><circle cx="514" cy="402" r="15" fill="#0b0a09"/>
+        <circle cx="434" cy="396" r="4.5" fill="#ff4b1f"/><circle cx="520" cy="396" r="4.5" fill="#ff4b1f"/>
+        <path d="M402 470 L392 446 L436 470 Z" fill="#efe9da" stroke="#0b0a09" stroke-width="3" stroke-linejoin="round"/>
+        <rect x="368" y="468" width="196" height="62" rx="24" fill="#efe9da" stroke="#0b0a09" stroke-width="3"/>
+        <text x="466" y="495" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="500" fill="#0b0a09">… Il vient de</text>
+        <text x="466" y="513" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="500" fill="#0b0a09">s’allumer.</text>
+      </g>
+      <rect x="348" y="266" width="236" height="282" fill="none" stroke="#0b0a09" stroke-width="5"/>
+
+      <!-- PANEL 4 : la tour -->
+      <g clip-path="url(#c4)">
+        <rect x="16" y="562" width="568" height="222" fill="#12100e"/>
+        <rect x="16" y="562" width="568" height="150" fill="url(#ht)" opacity=".15"/>
+        <g fill="#efe9da"><circle cx="70" cy="650" r="1.3"/><circle cx="240" cy="590" r="1.4"/><circle cx="330" cy="624" r="1.2"/><circle cx="406" cy="582" r="1.4"/><circle cx="560" cy="604" r="1.3"/><circle cx="188" cy="640" r="1.2"/></g>
+        <path d="M498 604 L170 574 L170 690 Z" fill="#ff4b1f" opacity=".2"/>
+        <rect x="482" y="620" width="34" height="130" fill="#070605"/>
+        <rect x="472" y="594" width="54" height="30" fill="#070605"/>
+        <rect x="490" y="602" width="18" height="13" fill="#ff4b1f"/>
+        <path fill="#070605" d="M16 784 V742 Q150 724 300 738 T584 730 V784 Z"/>
+        <circle cx="152" cy="690" r="9" fill="#efe9da"/>
+        <path fill="#efe9da" d="M140 706 Q152 698 164 706 L172 744 L132 744 Z"/>
+        <path d="M118 624 L142 672 L150 624 Z" fill="#efe9da" stroke="#0b0a09" stroke-width="3" stroke-linejoin="round"/>
+        <rect x="36" y="586" width="156" height="40" rx="18" fill="#efe9da" stroke="#0b0a09" stroke-width="3"/>
+        <text x="114" y="611" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="500" fill="#0b0a09">Alors, on y va.</text>
+        <rect x="486" y="752" width="86" height="22" fill="#efe9da" stroke="#0b0a09" stroke-width="2.5"/>
+        <text x="529" y="767" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="500" fill="#0b0a09">À SUIVRE…</text>
+      </g>
+      <rect x="16" y="562" width="568" height="222" fill="none" stroke="#0b0a09" stroke-width="5"/>
+    </g>
+  </defs>
+</svg>
+
+<nav class="nav" aria-label="Navigation principale">
+  <a class="brand" href="#top" aria-label="Panel to Motion, accueil">
+    <svg viewBox="0 0 22 22" aria-hidden="true"><rect x="2" y="2" width="11" height="18" fill="#efe9da"/><rect x="16" y="2" width="4" height="18" fill="#ff4b1f"/></svg>
+    Panel<span style="color:var(--acc)">→</span>Motion
+  </a>
+  <ul>
+    <li><a href="#parcours">Parcours</a></li>
+    <li><a href="#fonctions">Fonctions</a></li>
+    <li><a href="#formats">Formats</a></li>
+    <li><a href="#limites">Limites</a></li>
+  </ul>
+  <a class="pill fill" href="#installer">Installer</a>
+</nav>
+
+<main id="top">
+<header class="wrap hero">
+  <div>
+    <p class="label rise" style="--d:.05s">Planche → Storyboard → MP4</p>
+    <h1 class="disp">
+      <span class="rise" style="--d:.15s">Vos planches</span>
+      <span class="rise" style="--d:.28s">prennent <em>vie.</em></span>
+    </h1>
+    <p class="lead rise" style="--d:.45s">Importez une page de bande dessinée. Panel to Motion détecte les cases, lit les bulles, fait parler les personnages et sort une vidéo MP4 d’environ 60&nbsp;secondes.</p>
+    <div class="cta rise" style="--d:.6s">
+      <a class="pill fill" href="#installer">Lancer en local
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 8h12M9 3l5 5-5 5"/></svg></a>
+      <a class="pill ghost" href="#parcours">Voir le parcours</a>
+    </div>
+    <p class="meta label rise" style="--d:.75s"><span>Node.js 20</span><span>FFmpeg</span><span>Docker</span></p>
+  </div>
+
+  <div class="vis rise" style="--d:.35s" id="vis" role="img" aria-label="À gauche une planche de bande dessinée avec un cadre de caméra ; à droite la vidéo verticale générée à partir de ses cases, avec sous-titres.">
+    <div class="pageWrap" id="pageWrap">
+      <div class="page">
+        <svg viewBox="0 0 600 800" aria-hidden="true">
+          <use href="#pageG"/>
+          <path id="dim" fill="#0b0a09" opacity=".38" fill-rule="evenodd" d=""/>
+          <rect id="hudRect" x="0" y="0" width="0" height="0" fill="rgba(255,75,31,.08)" stroke="#ff4b1f" stroke-width="4"/>
+          <g fill="#ff4b1f"><rect class="hc" width="12" height="12"/><rect class="hc" width="12" height="12"/><rect class="hc" width="12" height="12"/><rect class="hc" width="12" height="12"/></g>
+        </svg>
+      </div>
+    </div>
+    <div class="phone">
+      <svg id="phoneSvg" viewBox="16 266 158 282" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#pageG"/></svg>
+      <div class="hud"><b id="tc">REC 00:00</b><span id="sc">SCÈNE 1/4</span></div>
+      <div class="sub" id="sub"><small id="who">Narrateur</small><p id="line"></p></div>
+      <div class="prog"><i id="prog"></i></div>
+    </div>
+    <div class="tag"><i>●</i> Aperçu en direct</div>
+  </div>
+</header>
+
+<div class="marq" aria-hidden="true"><div class="track" id="track"></div></div>
+
+<section class="wrap">
+  <div class="stats">
+    <div class="rv"><b>~60<sup>s</sup></b><p>durée cible de la vidéo finale</p></div>
+    <div class="rv" style="--d:.08s"><b>3</b><p>formats d’export : 9:16, 16:9 et 1:1</p></div>
+    <div class="rv" style="--d:.16s"><b>0</b><p>clé payante pour la chaîne complète</p></div>
+    <div class="rv" style="--d:.24s"><b>1</b><p>commande Docker pour tout installer</p></div>
+  </div>
+</section>
+
+<!-- ============ PARCOURS ============ -->
+<section class="journey" id="parcours" aria-labelledby="h-parcours">
+  <div class="wrap">
+    <header class="rv">
+      <p class="label">Le parcours</p>
+      <h2 class="disp" id="h-parcours">Importer. Vérifier. <em>Générer.</em></h2>
+    </header>
+
+    <div class="pin">
+      <div class="steps" id="steps">
+        <article class="step on" data-i="0">
+          <div class="n" aria-hidden="true">01</div>
+          <h3 class="disp">Importer</h3>
+          <p>Déposez des images JPG, PNG, WebP ou un PDF. Les PDF sont convertis page par page avec poppler, puis l’analyse démarre toute seule.</p>
+          <ul><li>JPG</li><li>PNG</li><li>WebP</li><li>PDF</li></ul>
+        </article>
+        <article class="step" data-i="1">
+          <div class="n" aria-hidden="true">02</div>
+          <h3 class="disp">Vérifier</h3>
+          <p>Cases détectées par XY-cut, bulles repérées, dialogues lus en français par OCR, dans l’ordre de lecture occidental ou manga. Chaque scène reste éditable : dialogue, personnage, voix, durée, recadrage, ordre.</p>
+          <ul><li>XY-cut</li><li>Tesseract</li><li>Occidental / manga</li></ul>
+        </article>
+        <article class="step" data-i="2">
+          <div class="n" aria-hidden="true">03</div>
+          <h3 class="disp">Générer</h3>
+          <p>Voix de synthèse gratuites, zoom et pan façon ken-burns avec FFmpeg, musique facultative avec ducking, volume normalisé, sous-titres SRT embarqués. Export en MP4 H.264 + AAC.</p>
+          <ul><li>msedge-tts</li><li>FFmpeg</li><li>MP4 H.264 + AAC</li></ul>
+        </article>
+      </div>
+
+      <div class="stage" id="stage" aria-hidden="true">
+        <div class="rail" id="rail"><i class="on"></i><i></i><i></i></div>
+
+        <!-- scène 1 -->
+        <div class="s s0 on">
+          <div class="pg"><svg viewBox="0 0 600 800"><use href="#pageG"/></svg><div class="scan"></div></div>
+          <div class="chip" style="left:5%;top:22%;--fx:-60px;--d:.1s"><i>01</i>planche-01.jpg</div>
+          <div class="chip" style="left:3%;top:46%;--fx:-60px;--d:.25s"><i>02</i>planche-02.webp</div>
+          <div class="chip" style="right:4%;top:30%;--fx:60px;--d:.4s"><i>03</i>tome-1.pdf</div>
+          <div class="chip" style="right:6%;top:62%;--fx:60px;--d:.55s"><i>04</i>page.png</div>
+        </div>
+
+        <!-- scène 2 -->
+        <div class="s s1">
+          <div class="pg">
+            <svg viewBox="0 0 600 800"><use href="#pageG"/>
+              <g class="ov">
+                <rect pathLength="1" x="16" y="16" width="568" height="236" style="--d:.1s"/>
+                <rect pathLength="1" x="16" y="266" width="318" height="282" style="--d:.35s"/>
+                <rect pathLength="1" x="348" y="266" width="236" height="282" style="--d:.6s"/>
+                <rect pathLength="1" x="16" y="562" width="568" height="222" style="--d:.85s"/>
+                <rect class="bub" x="32" y="30" width="238" height="46" rx="4" style="--d:1.1s"/>
+                <rect class="bub" x="186" y="284" width="140" height="60" rx="24" style="--d:1.2s"/>
+                <rect class="bub" x="368" y="468" width="196" height="62" rx="24" style="--d:1.3s"/>
+                <rect class="bub" x="36" y="586" width="156" height="40" rx="18" style="--d:1.4s"/>
+              </g>
+              <g font-family="Anton, Impact, sans-serif" font-size="44" text-anchor="middle" fill="#0b0a09">
+                <g class="bd" style="--d:.2s"><circle cx="560" cy="44" r="26" fill="#ff4b1f"/><text x="560" y="60">1</text></g>
+                <g class="bd" style="--d:.45s"><circle cx="314" cy="290" r="26" fill="#ff4b1f"/><text x="314" y="306">2</text></g>
+                <g class="bd" style="--d:.7s"><circle cx="560" cy="292" r="26" fill="#ff4b1f"/><text x="560" y="308">3</text></g>
+                <g class="bd" style="--d:.95s"><circle cx="560" cy="588" r="26" fill="#ff4b1f"/><text x="560" y="604">4</text></g>
+              </g>
+            </svg>
+          </div>
+          <div class="list">
+            <div class="row" style="--d:.5s"><b>01</b><span><small>Narrateur</small>Minuit. La ville retient son souffle.</span><em>3,6 s</em></div>
+            <div class="row" style="--d:.7s"><b>02</b><span><small>Personnage 1</small>Tu l’as vu, toi aussi ?</span><em>2,4 s</em></div>
+            <div class="row" style="--d:.9s"><b>03</b><span><small>Personnage 1</small>… Il vient de s’allumer.</span><em>2,8 s</em></div>
+            <div class="row" style="--d:1.1s"><b>04</b><span><small>Personnage 1</small>Alors, on y va.</span><em>2,2 s</em></div>
+          </div>
+        </div>
+
+        <!-- scène 3 -->
+        <div class="s s2">
+          <div class="ph">
+            <svg id="stageSvg" viewBox="16 266 158 282" preserveAspectRatio="xMidYMid slice"><use href="#pageG"/></svg>
+          </div>
+          <div class="jobs">
+            <div class="job"><div><span>Scène 01</span><em>rendue</em></div><div class="bar"><i style="--d:.2s"></i></div></div>
+            <div class="job"><div><span>Scène 02</span><em>rendue</em></div><div class="bar"><i style="--d:.7s"></i></div></div>
+            <div class="job"><div><span>Scène 03</span><em>rendue</em></div><div class="bar"><i style="--d:1.2s"></i></div></div>
+            <div class="job"><div><span>Scène 04</span><em>rendue</em></div><div class="bar"><i style="--d:1.7s"></i></div></div>
+            <div class="done"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="7.5"/><path d="M5.5 9.3l2.4 2.4 4.6-4.9"/></svg>Montage final prêt : MP4 + sous-titres SRT</div>
+          </div>
+        </div>
+
+        <div class="cap label"><span id="capL">Étape 01 / 03</span><span>Panel → Motion</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FONCTIONS ============ -->
+<section class="sect wrap" id="fonctions" aria-labelledby="h-fn">
+  <div class="rv">
+    <p class="label">Sous le capot</p>
+    <h2 class="disp" id="h-fn">Tout ce qu’il faut. <em>Rien de plus.</em></h2>
+  </div>
+  <div class="feat">
+    <div class="fr rv"><span class="i">01</span><h3>Cases &amp; bulles</h3><p>Détection des cases par XY-cut, des bulles par composantes claires. Ordre de lecture occidental ou manga.</p><span class="t">XY-cut</span></div>
+    <div class="fr rv"><span class="i">02</span><h3>OCR français</h3><p>Tesseract lit les dialogues en français, sans clé et sans abonnement.</p><span class="t">Tesseract</span></div>
+    <div class="fr rv"><span class="i">03</span><h3>Storyboard éditable</h3><p>Réordonnez, dupliquez, fusionnez, supprimez, ajoutez. Dialogues, personnages, voix, durées et recadrages se corrigent à la main.</p><span class="t">Manuel possible</span></div>
+    <div class="fr rv"><span class="i">04</span><h3>Voix gratuites</h3><p>Synthèse vocale via msedge-tts, l’endpoint gratuit de Microsoft Edge. Une connexion réseau est requise.</p><span class="t">msedge-tts</span></div>
+    <div class="fr rv"><span class="i">05</span><h3>Mouvement léger</h3><p>Zoom, pan et ken-burns rendus par FFmpeg, puis montage, musique avec ducking, volume normalisé et SRT embarqué.</p><span class="t">FFmpeg</span></div>
+    <div class="fr rv"><span class="i">06</span><h3>Reprise sur coupure</h3><p>Chaque scène est rendue séparément avec un hash d’entrées : les scènes valides sont sautées, et une seule scène peut être régénérée.</p><span class="t">Jobs persistés</span></div>
+  </div>
+</section>
+
+<!-- ============ FORMATS ============ -->
+<section class="sect wrap" id="formats" aria-labelledby="h-fm">
+  <div class="rv" style="text-align:center">
+    <p class="label">Export</p>
+    <h2 class="disp" id="h-fm">Un montage. Trois <em>cadrages.</em></h2>
+  </div>
+  <div class="fmts">
+    <figure class="fm rv"><div class="scr fr9"><svg id="f9" viewBox="16 266 158 282" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#pageG"/></svg></div><figcaption><b>9:16</b><span>vertical</span></figcaption></figure>
+    <figure class="fm rv" style="--d:.1s"><div class="scr fr16"><svg id="f16" viewBox="16 266 318 179" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#pageG"/></svg></div><figcaption><b>16:9</b><span>paysage</span></figcaption></figure>
+    <figure class="fm rv" style="--d:.2s"><div class="scr fr1"><svg id="f1" viewBox="16 266 282 282" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><use href="#pageG"/></svg></div><figcaption><b>1:1</b><span>carré</span></figcaption></figure>
+  </div>
+  <p class="fnote rv">Les trois cadrages suivent la même case, au même instant. Lecture intégrée, puis téléchargement du clip final, du fichier SRT et de chaque scène séparément.</p>
+</section>
+
+<!-- ============ LIMITES ============ -->
+<section class="paper" id="limites" aria-labelledby="h-lim">
+  <div class="wrap">
+    <p class="label">En toute franchise</p>
+    <h2 class="disp" id="h-lim" style="font-size:clamp(46px,6.2vw,104px);margin-top:20px">Ce qui marche. Ce qui reste <em>à faire.</em></h2>
+    <div class="cols">
+      <div class="col k rv">
+        <p class="label">Sans aucune clé</p><h3>Déjà là</h3>
+        <ul>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg>Chaîne complète : import, storyboard, voix, mouvement, montage, MP4 téléchargeable</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg>Reprise après interruption et régénération d’une seule scène</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg>Parcours manuel si l’analyse automatique échoue</li>
+        </ul>
+      </div>
+      <div class="col o rv" style="--d:.1s">
+        <p class="label">Avec une clé externe</p><h3>En option</h3>
+        <ul>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>Animation IA image-vers-vidéo, moteur interchangeable (Replicate / Stable Video Diffusion par défaut) avec <code>REPLICATE_API_TOKEN</code></li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>Si le moteur échoue ou manque : repli automatique sur le mouvement léger</li>
+        </ul>
+      </div>
+      <div class="col t rv" style="--d:.2s">
+        <p class="label">Pas encore intégré</p><h3>À développer</h3>
+        <ul>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="5.5"/></svg>Suppression des bulles avec reconstruction du fond (inpainting)</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="5.5"/></svg>Synchronisation labiale</li>
+          <li><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="5.5"/></svg>Attribution automatique du personnage qui parle : le choix reste manuel, scène par scène</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ INSTALL ============ -->
+<section class="install wrap" id="installer" aria-labelledby="h-in">
+  <p class="label rv">Installation</p>
+  <h2 class="disp rv" id="h-in"><span>Une planche.</span><span>Une commande.</span><span><em>Un film.</em></span></h2>
+
+  <div class="term">
+    <div class="box rv">
+      <header><span class="label">Docker · recommandé</span><button type="button" data-copy="docker compose up -d --build">Copier</button></header>
+      <pre><i>$</i> docker compose up -d --build</pre>
+      <p>FFmpeg et poppler sont inclus dans l’image. Les données persistent dans <code>./data</code>. Ouvrez ensuite http://localhost:3000.</p>
+    </div>
+    <div class="box rv" style="--d:.1s">
+      <header><span class="label">Node.js 20+</span><button type="button" data-copy="cd server&#10;cp .env.example .env&#10;npm install&#10;npm start">Copier</button></header>
+<pre><i>$</i> cd server
+<i>$</i> cp .env.example .env
+<i>$</i> npm install
+<i>$</i> npm start</pre>
+      <p>Prérequis : FFmpeg et poppler (pdftoppm) installés sur la machine.</p>
+    </div>
+  </div>
+
+  <footer class="foot">
+    <span>Panel to Motion</span>
+    <span>Node.js · Express · FFmpeg · stockage fichier par projet, sans base de données</span>
+  </footer>
+</section>
+</main>
+
+<script>
+(()=>{
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const NS='http://www.w3.org/2000/svg';
+document.documentElement.classList.add('js');
+const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const pad=n=>String(n).padStart(2,'0');
+
+/* marquee */
+const words=['Cases détectées','OCR français','Voix gratuites','Mouvement ken-burns','Sous-titres SRT','MP4 H.264 + AAC','9:16 · 16:9 · 1:1','Reprise sur coupure'];
+const mk=()=>words.map(w=>`<span>${w}</span>`).join('');
+$('#track').innerHTML=mk()+mk()+mk()+mk();
+
+/* speed lines in panel 3 */
+const sp=$('#speed');
+for(let a=0;a<360;a+=9){ if(a%27===0) continue;
+  const r=a*Math.PI/180,c=Math.cos(r),s=Math.sin(r),l=document.createElementNS(NS,'line');
+  l.setAttribute('x1',466+c*122);l.setAttribute('y1',402+s*66);l.setAttribute('x2',466+c*340);l.setAttribute('y2',402+s*340);sp.appendChild(l);}
+
+/* camera path over the four panels */
+const PANELS=[
+ {x:16,y:16,w:568,h:236,who:'Narrateur',line:'Minuit. La ville retient son souffle.'},
+ {x:16,y:266,w:318,h:282,who:'Personnage 1',line:'Tu l’as vu, toi aussi ?'},
+ {x:348,y:266,w:236,h:282,who:'Personnage 1',line:'… Il vient de s’allumer.'},
+ {x:16,y:562,w:568,h:222,who:'Personnage 1',line:'Alors, on y va.'}];
+const N=PANELS.length,D=3600,T=900,PER=D+T,L=PER*N;
+const ease=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const lerp=(a,b,k)=>a+(b-a)*k;
+function rectFor(i,u,AR){
+  const p=PANELS[i],z=1-.14*ease(u);
+  const H=Math.min(p.h,p.w/AR)*z,W=H*AR,k=ease(u);
+  const cx=lerp(p.x+W/2,p.x+p.w-W/2,k),cy=p.y+p.h/2;
+  return {x:cx-W/2,y:cy-H/2,w:W,h:H};
+}
+function cam(t,AR){
+  t=((t%L)+L)%L;
+  const i=Math.floor(t/PER),local=t-i*PER;
+  if(local<D){const u=local/D;return {...rectFor(i,u,AR),i,u,dwell:true,t};}
+  const k=ease((local-D)/T),a=rectFor(i,1,AR),b=rectFor((i+1)%N,0,AR);
+  return {x:lerp(a.x,b.x,k),y:lerp(a.y,b.y,k),w:lerp(a.w,b.w,k),h:lerp(a.h,b.h,k),i:k>.5?(i+1)%N:i,u:1,dwell:false,t};
+}
+
+/* registry of live previews */
+const items=[];
+function reg(svg,AR,hero){
+  const it={svg,AR,hero,vis:false};items.push(it);
+  new IntersectionObserver(es=>{es.forEach(e=>{it.vis=e.isIntersecting});kick();},{rootMargin:'80px'}).observe(svg.closest('.vis,.ph,.scr')||svg);
+  return it;
+}
+const hud=$('#hudRect'),dim=$('#dim'),hcs=$$('.hc'),tc=$('#tc'),sc=$('#sc'),sub=$('#sub'),who=$('#who'),line=$('#line'),prog=$('#prog');
+let lastI=-1;
+function paintHero(c){
+  const f=v=>v.toFixed(1);
+  hud.setAttribute('x',f(c.x));hud.setAttribute('y',f(c.y));hud.setAttribute('width',f(c.w));hud.setAttribute('height',f(c.h));
+  dim.setAttribute('d',`M0 0H600V800H0Z M${f(c.x)} ${f(c.y)}h${f(c.w)}v${f(c.h)}h${f(-c.w)}Z`);
+  [[c.x,c.y],[c.x+c.w,c.y],[c.x,c.y+c.h],[c.x+c.w,c.y+c.h]].forEach((p,j)=>{hcs[j].setAttribute('x',f(p[0]-6));hcs[j].setAttribute('y',f(p[1]-6));});
+  tc.textContent='REC 00:'+pad(Math.floor(c.t/1000));
+  prog.style.width=(c.t/L*100)+'%';
+  if(c.i!==lastI){lastI=c.i;sc.textContent=`SCÈNE ${c.i+1}/${N}`;who.textContent=PANELS[c.i].who;line.textContent=PANELS[c.i].line;}
+  sub.classList.toggle('show',c.dwell&&c.u>.04&&c.u<.97);
+}
+function frame(now){
+  raf=0;let any=false;
+  if(!t0) t0=now;
+  const t=RM?PER*1+1700:now-t0;
+  for(const it of items){ if(!it.vis) continue; any=true;
+    const c=cam(t,it.AR);
+    it.svg.setAttribute('viewBox',`${c.x.toFixed(1)} ${c.y.toFixed(1)} ${c.w.toFixed(1)} ${c.h.toFixed(1)}`);
+    if(it.hero) paintHero(c);
+  }
+  if(any&&!RM) raf=requestAnimationFrame(frame);
+}
+let raf=0,t0=0;
+function kick(){ if(!raf) raf=requestAnimationFrame(frame); }
+reg($('#phoneSvg'),9/16,true);
+reg($('#stageSvg'),9/16,false);
+reg($('#f9'),9/16,false);
+reg($('#f16'),16/9,false);
+reg($('#f1'),1,false);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) kick(); });
+
+/* pointer parallax on hero visual */
+const vis=$('#vis');
+if(!RM&&matchMedia('(pointer:fine)').matches){
+  window.addEventListener('pointermove',e=>{
+    const r=vis.getBoundingClientRect();
+    const x=Math.max(-1,Math.min(1,(e.clientX-(r.left+r.width/2))/(innerWidth/2)));
+    const y=Math.max(-1,Math.min(1,(e.clientY-(r.top+r.height/2))/(innerHeight/2)));
+    vis.style.setProperty('--px',x.toFixed(3));vis.style.setProperty('--py',y.toFixed(3));
+  },{passive:true});
+}
+
+/* reveal on view */
+const rvIO=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');rvIO.unobserve(e.target);}}),{threshold:.15,rootMargin:'0px 0px -6% 0px'});
+$$('.rv').forEach(el=>rvIO.observe(el));
+
+/* pinned journey: step in view drives the stage */
+const steps=$$('.step'),scenes=$$('.s'),rail=$$('#rail i'),capL=$('#capL');
+function setStep(i){
+  steps.forEach((s,j)=>s.classList.toggle('on',j===i));
+  scenes.forEach((s,j)=>s.classList.toggle('on',j===i));
+  rail.forEach((r,j)=>r.classList.toggle('on',j<=i));
+  capL.textContent=`Étape ${pad(i+1)} / 03`;
+}
+const small=matchMedia('(max-width:860px)').matches;
+const stIO=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting)setStep(+e.target.dataset.i);}),{rootMargin:small?'-72% 0px -20% 0px':'-42% 0px -42% 0px'});
+steps.forEach(s=>stIO.observe(s));
+
+/* copy buttons */
+$$('[data-copy]').forEach(b=>b.addEventListener('click',async()=>{
+  const txt=b.dataset.copy.replace(/&#10;/g,'\n');
+  try{await navigator.clipboard.writeText(txt);}catch(_){const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy')}catch(__){}ta.remove();}
+  const o=b.textContent;b.textContent='Copié';setTimeout(()=>b.textContent=o,1400);
+}));
+})();
+</script>
+</body>
+</html>
