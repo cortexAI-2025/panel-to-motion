@@ -1,8 +1,17 @@
 import { execFile } from 'child_process';
-import ffmpegPath from 'ffmpeg-static';
+import { existsSync } from 'fs';
+import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 
-const ffprobePath = ffprobeStatic.path;
+// Binaire : variable d'environnement > binaire npm s'il est present > PATH systeme.
+function resolveBin(envName, npmPath, systemName) {
+  if (process.env[envName]) return process.env[envName];
+  if (npmPath && existsSync(npmPath)) return npmPath;
+  return systemName;
+}
+
+export const ffmpegPath = resolveBin('FFMPEG_PATH', ffmpegStatic, 'ffmpeg');
+export const ffprobePath = resolveBin('FFPROBE_PATH', ffprobeStatic && ffprobeStatic.path, 'ffprobe');
 
 export function runFFmpeg(args) {
   return new Promise((resolve, reject) => {

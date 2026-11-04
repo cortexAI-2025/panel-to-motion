@@ -1,5 +1,19 @@
 import sharp from 'sharp';
+import path from 'path';
+import { createRequire } from 'module';
 import { createWorker } from 'tesseract.js';
+
+const nodeRequire = createRequire(import.meta.url);
+
+// Donnees de langue : paquet npm local (hors ligne) si disponible, sinon CDN.
+export function localOcrLangPath() {
+  try {
+    const pkg = nodeRequire.resolve('@tesseract.js-data/fra/package.json');
+    return path.join(path.dirname(pkg), '4.0.0_best_int');
+  } catch {
+    return null;
+  }
+}
 
 const WHITE = 235;
 
@@ -153,7 +167,7 @@ export async function detectBubbles(file, g) {
       const h = maxY - minY + 1;
       const fill = bright / (w * h);
       // une bulle : zone claire, assez remplie, pas trop grande, plus large que haute
-      if (area >= minArea && area <= maxArea && fill >= 0.55 && h < g.height * 0.4 && w > h * 0.5) {
+      if (area >= minArea && area <= maxArea && fill >= 0.45 && h < g.height * 0.4 && w > h * 0.5) {
         bubbles.push({ x: minX, y: minY, w, h, fill });
       }
     }
@@ -184,15 +198,20 @@ export function orderRegions(regions, reading = 'western') {
 }
 
 export async function ocrRegion(worker, file, rect) {
+  // Rogner le trait de contour et la queue de la bulle, agrandir, puis ajouter
+  // une marge blanche : ces trois gestes reduisent fortement le bruit OCR.
+  const inset = Math.round(Math.min(rect.w, rect.h) * 0.05);
+  const left = rect.x + inset;
+  const top = rect.y + inset;
+  const width = Math.max(8, rect.w - 2 * inset);
+  const height = Math.max(8, rect.h - 2 * inset);
   const buf = await sharp(file)
-    .extract({
-      left: rect.x,
-      top: rect.y,
-      width: rect.w,
-      height: rect.h,
-    })
+    .extract({ left, top, width, height })
     .grayscale()
     .normalize()
+    .resize({ width: Math.round(width * 2), kernel: 'lanczos3' })
+    .extend({ top: 24, bottom: 24, left: 24, right: 24, background: '#ffffff' })
+    .png()
     .toBuffer();
   const { data } = await worker.recognize(buf);
   const text = String(data.text || '')
@@ -221,10 +240,16 @@ export async function analyzePage(file, reading = 'western') {
   if (clean.length === 0) clean.push({ x: 0, y: 0, w: g.width, h: g.height });
 
   const bubbles = await detectBubbles(file, g);
-  await ensureOcrLanguage();
+  const langPath = localOcrLangPath();
+  if (!langPath) await ensureOcrLanguage();
   // Sans errorHandler, tesseract.js leve une erreur hors de la chaine de promesses
   // et fait tomber le serveur entier.
-  const worker = await createWorker('fra', 1, { errorHandler: () => {} });
+  const worker = await createWorker('fra', 1, {
+    errorHandler: () => {},
+    ...(langPath ? { langPath, gzip: true, cacheMethod: 'none' } : {}),
+  });
+  // PSM 6 : un bloc de texte uniforme, ce qu'est une bulle.
+  await worker.setParameters({ tessedit_pageseg_mode: '6' });
 
   const scenes = [];
   const usedBubbles = new Set();
@@ -238,6 +263,9 @@ export async function analyzePage(file, reading = 'western') {
       continue;
     }
     const ordered = orderRegions(panelBubbles, reading);
+    // Une seule bulle : la scene montre la case entiere. Plusieurs bulles :
+    // chaque scene cadre sa bulle pour distinguer les repliques.
+    const wholePanel = ordered.length === 1;
     for (const b of ordered) {
       usedBubbles.add(b);
       // recadrage : la bulle elargie pour garder le dessin autour
@@ -253,7 +281,7 @@ export async function analyzePage(file, reading = 'western') {
         w: Math.round(b.w / g.scale),
         h: Math.round(b.h / g.scale),
       });
-      scenes.push({ kind: 'dialogue', crop: rectToFractions(rect, g), dialogue: ocr.text, ocrConfidence: ocr.confidence });
+      scenes.push({ kind: 'dialogue', crop: rectToFractions(wholePanel ? panel : rect, g), dialogue: ocr.text, ocrConfidence: ocr.confidence });
     }
   }
   await worker.terminate();

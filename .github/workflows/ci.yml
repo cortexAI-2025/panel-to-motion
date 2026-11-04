@@ -1,0 +1,88 @@
+name: CI
+on:
+  push:
+    branches: [main, 'feat/**', 'ccr-**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  FFMPEG_PATH: /usr/bin/ffmpeg
+  FFPROBE_PATH: /usr/bin/ffprobe
+jobs:
+  checks:
+    name: Tests + demo planche -> MP4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Installer FFmpeg et poppler
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg poppler-utils
+      - run: npm ci --ignore-scripts
+      - name: Syntaxe
+        run: |
+          for f in $(git ls-files 'src/**/*.js' 'scripts/*.mjs' 'test/*.mjs'); do node --check "$f"; done
+          node --check ../web/app.js
+      - name: Tests unitaires
+        run: npm test
+      - name: Demo de bout en bout (voix locale eSpeak, hors ligne)
+        env:
+          TTS_PROVIDER: local
+          E2E_REQUIRE_REAL_VOICE: '1'
+          E2E_OUT: ${{ github.workspace }}/e2e-out/local
+        run: npm run e2e
+      - name: Resume
+        if: always()
+        run: |
+          if [ -f ../e2e-out/local/report.json ]; then
+            node -e "const r=require('../e2e-out/local/report.json');const f=r.checks.filter(c=>!c.ok);console.log('## Demo planche -> MP4 (voix locale)\n\nSHA: '+process.env.GITHUB_SHA+'\n\nControles : '+(r.checks.length-f.length)+'/'+r.checks.length+' OK\n\nVoix : '+JSON.stringify(r.info.voice)+'\n\nDuree : '+(r.info.ffprobe&&r.info.ffprobe.duration)+' s')" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: demo-mp4-srt-voix-locale
+          path: |
+            e2e-out/local/final.mp4
+            e2e-out/local/sous-titres.srt
+            e2e-out/local/report.json
+            e2e-out/local/manifest.json
+            e2e-out/local/frames/scene-*.png
+          if-no-files-found: error
+          retention-days: 14
+      - name: Demo avec voix neuronales Edge (informatif, reseau Microsoft requis)
+        id: edge
+        continue-on-error: true
+        env:
+          TTS_PROVIDER: edge
+          E2E_REQUIRE_REAL_VOICE: '1'
+          E2E_OUT: ${{ github.workspace }}/e2e-out/edge
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: demo-mp4-srt-voix-edge
+          path: |
+            e2e-out/edge/final.mp4
+            e2e-out/edge/sous-titres.srt
+            e2e-out/edge/report.json
+            e2e-out/edge/manifest.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Resume voix Edge
+        if: always()
+        run: |
+          echo "## Voix neuronales Edge (informatif)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Resultat : **${{ steps.edge.outcome }}**. Hors de ce resultat, la validation de la demo repose sur la voix locale eSpeak." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.edge.outcome }}" != "success" ]; then echo "::warning::Voix Edge non verifiee : endpoint Microsoft injoignable ou refuse depuis ce runner."; fi

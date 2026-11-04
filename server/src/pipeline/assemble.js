@@ -28,31 +28,37 @@ export function buildSRT(sceneTimings) {
   return out;
 }
 
+// Ligne du fichier de liste du demuxer concat : guillemets simples, une
+// apostrophe dans le chemin s'ecrit '\\'' (les guillemets JSON ne sont pas valides).
+export function concatLine(file) {
+  return "file '" + path.resolve(file).replace(/'/g, "'\\''") + "'";
+}
+
 // Montage final : concat des scenes, normalisation du volume,
 // musique facultative avec ducking (baisse pendant les dialogues),
 // sous-titres SRT embarques en piste mov_text.
 export async function assembleFinal({ sceneFiles, srtPath, musicPath, outPath, workDir }) {
   fs.mkdirSync(workDir, { recursive: true });
   const listFile = path.join(workDir, 'concat.txt');
-  fs.writeFileSync(listFile, sceneFiles.map((p) => 'file ' + JSON.stringify(path.resolve(p))).join('\n'));
+  fs.writeFileSync(listFile, sceneFiles.map(concatLine).join('\n') + '\n');
 
   const args = ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-i', srtPath];
   let filter;
   if (musicPath) {
     args.push('-stream_loop', '-1', '-i', musicPath);
     filter =
-      '[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[da];' +
+      '[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=44100[da];' +
       '[2:a]volume=0.35[m];' +
       '[m][da]sidechaincompress=threshold=0.03:ratio=8:attack=25:release=400[duck];' +
-      '[da][duck]amix=inputs=2:duration=first:dropout_transition=0[a]';
+      '[da][duck]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[a]';
   } else {
-    filter = '[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[a]';
+    filter = '[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=44100[a]';
   }
   args.push(
     '-filter_complex', filter,
     '-map', '0:v', '-map', '[a]', '-map', '1:s',
     '-c:v', 'copy',
-    '-c:a', 'aac', '-b:a', '160k',
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '44100',
     '-c:s', 'mov_text',
     '-metadata:s:s:0', 'language=fre',
     '-shortest',

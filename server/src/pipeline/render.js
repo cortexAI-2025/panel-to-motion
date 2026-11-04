@@ -10,7 +10,7 @@ import {
 } from '../store.js';
 import { mediaDuration, assertPlayableVideo } from '../ffmpeg.js';
 import { prepareSceneImage, renderScene, muxAudio, MOTIONS } from './animate.js';
-import { synthesize, voiceFilePath } from './tts.js';
+import { synthesize, voiceFilePath, ttsConfig } from './tts.js';
 import { buildSRT, assembleFinal } from './assemble.js';
 import { aiAvailable, generateSceneVideo } from './videoai.js';
 
@@ -19,12 +19,22 @@ const AMBIANCE_DURATION = 2.5;
 
 // Hash des entrees d'une scene : tout changement (image, recadrage,
 // dialogue, voix, duree, mouvement, format) invalide le rendu existant.
-export function sceneHash(scene, format) {
+export const DEFAULT_VOICE = 'fr-FR-DeniseNeural';
+
+// La voix d'une scene : celle du personnage attribue, sinon celle de la scene.
+export function resolveVoice(project, scene) {
+  const ch = scene.characterId && (project.characters || []).find((c) => c.id === scene.characterId);
+  return (ch && ch.voiceId) || scene.voiceId || DEFAULT_VOICE;
+}
+
+export function sceneHash(scene, format, project = {}) {
+  const cfg = ttsConfig();
   const inputs = {
     image: scene.image || null,
     crop: scene.crop || null,
     dialogue: scene.dialogue || '',
-    voiceId: scene.voiceId || null,
+    voiceId: resolveVoice(project, scene),
+    tts: cfg.provider + '>' + (cfg.fallback || ''),
     durationOverride: scene.durationOverride || null,
     motion: scene.motion || null,
     format: format || '9:16',
@@ -57,7 +67,7 @@ export async function renderOneScene(project, scene, index = 0) {
   const format = project.format || '9:16';
   const dir = sceneWorkPath(project.id, scene.id);
   fs.mkdirSync(dir, { recursive: true });
-  const hash = sceneHash(scene, format);
+  const hash = sceneHash(scene, format, project);
 
   const srcPath = scene.image
     ? path.join(projectSourceDir(project.id), scene.image)
@@ -71,13 +81,15 @@ export async function renderOneScene(project, scene, index = 0) {
   // 2. Voix (si dialogue)
   let audioPath = null;
   let voiceDuration = 0;
+  let voiceSource = null;
   const dialogue = (scene.dialogue || '').trim();
   if (dialogue) {
-    const voiceId = scene.voiceId || 'fr-FR-DeniseNeural';
-    audioPath = voiceFilePath(dir, voiceId, dialogue);
-    if (!fs.existsSync(audioPath)) {
-      await synthesize(dialogue, voiceId, audioPath);
-    }
+    const voiceId = resolveVoice(project, scene);
+    const res = await synthesize(dialogue, voiceId, null, {
+      pathFor: (provider) => voiceFilePath(dir, voiceId, dialogue, provider),
+    });
+    audioPath = res.path;
+    voiceSource = res.source;
     voiceDuration = await mediaDuration(audioPath);
     if (!voiceDuration) throw new Error('Audio de voix illisible pour la scene ' + scene.id);
   }
@@ -114,6 +126,8 @@ export async function renderOneScene(project, scene, index = 0) {
     video: videoPath,
     duration,
     usedAI,
+    voiceSource,
+    voiceId: dialogue ? resolveVoice(project, scene) : null,
   };
 }
 
@@ -128,7 +142,7 @@ export async function runGeneration(project, onProgress) {
   for (let i = 0; i < scenes.length; i++) {
     const scene = scenes[i];
     const format = project.format || '9:16';
-    const hash = sceneHash(scene, format);
+    const hash = sceneHash(scene, format, project);
     const videoPath = path.join(sceneWorkPath(project.id, scene.id), 'video.mp4');
     const prev = scene.generated;
     if (prev && prev.hash === hash && prev.duration > 0 && (await playable(videoPath))) {
@@ -178,11 +192,44 @@ export async function runGeneration(project, onProgress) {
   });
 
   const totalDuration = okScenes.reduce((acc, s) => acc + s.generated.duration, 0);
+
+  // Manifeste : trace de ce qui a reellement ete produit (ordre, voix, durees).
+  let t = 0;
+  const manifestScenes = okScenes.map((s) => {
+    const entry = {
+      id: s.id,
+      image: s.image,
+      dialogue: s.dialogue || '',
+      characterId: s.characterId || null,
+      voiceId: s.generated.voiceId || null,
+      voiceSource: s.generated.voiceSource || null,
+      start: Number(t.toFixed(3)),
+      duration: Number(s.generated.duration.toFixed(3)),
+    };
+    t += s.generated.duration;
+    return entry;
+  });
+  const voiceSources = [...new Set(manifestScenes.map((m) => m.voiceSource).filter(Boolean))];
+  const manifest = {
+    projectId: project.id,
+    title: project.title,
+    format: project.format || '9:16',
+    tts: ttsConfig(),
+    voiceSources,
+    realVoice: voiceSources.length > 0 && !voiceSources.includes('test'),
+    totalDuration: Number(totalDuration.toFixed(3)),
+    scenes: manifestScenes,
+    failed,
+  };
+  fs.writeFileSync(path.join(projectOutputDir(project.id), 'manifest.json'), JSON.stringify(manifest, null, 2));
+
   return {
     finalPath: outPath,
     srtPath,
     done: okScenes.length,
     failed,
     totalDuration,
+    voiceSources,
+    realVoice: manifest.realVoice,
   };
 }
