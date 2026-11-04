@@ -171,10 +171,13 @@ try {
   const a = probe.streams.find((s) => s.codec_type === 'audio');
   const st = probe.streams.find((s) => s.codec_type === 'subtitle');
   const dur = parseFloat(probe.format.duration);
-  report.info.ffprobe = { format: probe.format.format_name, duration: dur, video: v && { codec: v.codec_name, profile: v.profile, width: v.width, height: v.height, fps: v.r_frame_rate, pix_fmt: v.pix_fmt }, audio: a && { codec: a.codec_name, sample_rate: a.sample_rate, channels: a.channels }, subtitle: st && st.codec_name };
+  report.info.ffprobe = { format: probe.format.format_name, duration: dur, video: v && { codec: v.codec_name, profile: v.profile, width: v.width, height: v.height, fps: v.avg_frame_rate, pix_fmt: v.pix_fmt }, audio: a && { codec: a.codec_name, sample_rate: a.sample_rate, channels: a.channels }, subtitle: st && st.codec_name };
   check('ffprobe : piste video H.264', v && v.codec_name === 'h264', v && v.codec_name);
   check('ffprobe : piste audio AAC', a && a.codec_name === 'aac', a && a.codec_name);
   check('ffprobe : piste de sous-titres embarquee', !!st, st && st.codec_name);
+  check('ffprobe : audio 44,1 kHz (compatibilite lecteurs)', a && Number(a.sample_rate) === 44100, a && a.sample_rate);
+  const fps = v ? (() => { const [n, d] = String(v.avg_frame_rate).split('/').map(Number); return n / (d || 1); })() : 0;
+  check('ffprobe : environ 25 images/s (+-0,3)', Math.abs(fps - 25) <= 0.3, fps);
   check('ffprobe : format 9:16 (1080x1920)', v && v.width === 1080 && v.height === 1920, v && [v.width, v.height]);
   check('ffprobe : duree = somme des scenes (+-0.3 s)', Math.abs(dur - manifest.totalDuration) <= 0.3, { dur, attendu: manifest.totalDuration });
   check('ffprobe : duree lisible (>= 8 s)', dur >= 8, dur);

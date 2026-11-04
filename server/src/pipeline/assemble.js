@@ -47,18 +47,18 @@ export async function assembleFinal({ sceneFiles, srtPath, musicPath, outPath, w
   if (musicPath) {
     args.push('-stream_loop', '-1', '-i', musicPath);
     filter =
-      '[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[da];' +
+      '[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=44100[da];' +
       '[2:a]volume=0.35[m];' +
       '[m][da]sidechaincompress=threshold=0.03:ratio=8:attack=25:release=400[duck];' +
-      '[da][duck]amix=inputs=2:duration=first:dropout_transition=0[a]';
+      '[da][duck]amix=inputs=2:duration=first:dropout_transition=0,aresample=44100[a]';
   } else {
-    filter = '[0:a]loudnorm=I=-16:TP=-1.5:LRA=11[a]';
+    filter = '[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=44100[a]';
   }
   args.push(
     '-filter_complex', filter,
     '-map', '0:v', '-map', '[a]', '-map', '1:s',
     '-c:v', 'copy',
-    '-c:a', 'aac', '-b:a', '160k',
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '44100',
     '-c:s', 'mov_text',
     '-metadata:s:s:0', 'language=fre',
     '-shortest',
