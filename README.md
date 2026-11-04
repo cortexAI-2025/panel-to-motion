@@ -56,6 +56,49 @@ FFmpeg et poppler sont inclus dans l'image. Les donnees persistent dans `./data`
 
 Voir `server/.env.example` : `PORT`, `DATA_DIR`, `MAX_UPLOAD_MB`, `VIDEO_AI_PROVIDER`, `REPLICATE_API_TOKEN`, `REPLICATE_VIDEO_MODEL`.
 
+## Demo reproductible : planche -> MP4 + SRT
+
+La planche de demonstration `demo/planche-demo.png` (4 cases, 3 personnages) est un dessin
+original, libre de droits (CC0) ; `node demo/make-board.mjs` la regenere.
+
+Depuis un clone propre (Node 22, FFmpeg et ffprobe installes) :
+
+    git clone https://github.com/cortexAI-2025/panel-to-motion && cd panel-to-motion
+    git checkout feat/v1-planche-to-mp4
+    cd server && npm ci --ignore-scripts
+    FFMPEG_PATH=$(which ffmpeg) FFPROBE_PATH=$(which ffprobe) \
+      TTS_PROVIDER=local E2E_OUT=$PWD/../e2e-out npm run e2e
+
+La commande demarre le serveur par son point d'entree normal (`node src/index.js`), puis, par
+l'API : importe la planche, lance l'analyse (cases + OCR), corrige l'ordre / le texte / l'attribution
+des personnages, genere les voix et le montage, puis controle le resultat (ffprobe : H.264 + AAC +
+piste de sous-titres, duree, SRT, image de chaque scene, voix scene par scene). Sortie dans
+`e2e-out/` : `final.mp4`, `sous-titres.srt`, `manifest.json`, `report.json`, `frames/`.
+
+### Fournisseurs de voix (`TTS_PROVIDER`)
+
+| Valeur | Voix | Reseau |
+|---|---|---|
+| `edge` (defaut) | voix neuronales Microsoft Edge, 7 voix francaises | requis |
+| `local` | synthese eSpeak (meSpeak), robotique mais reelle | non |
+| `test` | **audio de test** (bips, pas de parole) pour valider le montage seul | non |
+
+`TTS_FALLBACK=local|test` autorise un repli explicite si le premier fournisseur echoue. Le fournisseur
+reellement utilise est consigne par scene dans `output/manifest.json` (`voiceSource`, `realVoice`) :
+un audio de test n'est jamais presente comme une voix generee. meSpeak (GPL) est une dependance
+optionnelle.
+
+### Corriger avant le rendu
+
+Etape 2 de l'interface : texte de chaque bulle, ordre (↑ ↓, dupliquer, fusionner, supprimer),
+personnages (nom + voix) et attribution de chaque replique au personnage qui parle.
+
+### CI
+
+`.github/workflows/ci.yml` : tests unitaires, puis la demo ci-dessus (voix locale, hors ligne).
+Artefacts : `demo-mp4-srt-voix-locale` (MP4, SRT, rapport, images) et, si le reseau Microsoft
+repond, `demo-mp4-srt-voix-edge`.
+
 ## Tests de validation
 
 Suivre la checklist `docs/VALIDATION.md` : d'abord 2 scenes, puis une planche de 8 a 12 scenes ; verifier son synchronise, ordre des scenes, lecture sur Android, reprise apres erreur, regeneration d'une scene, telechargements reels.

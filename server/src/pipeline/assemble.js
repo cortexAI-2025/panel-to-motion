@@ -28,13 +28,19 @@ export function buildSRT(sceneTimings) {
   return out;
 }
 
+// Ligne du fichier de liste du demuxer concat : guillemets simples, une
+// apostrophe dans le chemin s'ecrit '\\'' (les guillemets JSON ne sont pas valides).
+export function concatLine(file) {
+  return "file '" + path.resolve(file).replace(/'/g, "'\\''") + "'";
+}
+
 // Montage final : concat des scenes, normalisation du volume,
 // musique facultative avec ducking (baisse pendant les dialogues),
 // sous-titres SRT embarques en piste mov_text.
 export async function assembleFinal({ sceneFiles, srtPath, musicPath, outPath, workDir }) {
   fs.mkdirSync(workDir, { recursive: true });
   const listFile = path.join(workDir, 'concat.txt');
-  fs.writeFileSync(listFile, sceneFiles.map((p) => 'file ' + JSON.stringify(path.resolve(p))).join('\n'));
+  fs.writeFileSync(listFile, sceneFiles.map(concatLine).join('\n') + '\n');
 
   const args = ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-i', srtPath];
   let filter;

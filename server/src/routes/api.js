@@ -19,7 +19,7 @@ import {
   saveJob,
 } from '../store.js';
 import { analyzePage } from '../pipeline/analyze.js';
-import { FRENCH_VOICES, synthesize } from '../pipeline/tts.js';
+import { FRENCH_VOICES, synthesize, voiceFilePath, ttsConfig } from '../pipeline/tts.js';
 import { runGeneration } from '../pipeline/render.js';
 
 export const api = Router();
@@ -193,24 +193,38 @@ api.put('/projects/:id/storyboard', requireProject, (req, res) => {
   const b = req.body || {};
   if (!Array.isArray(b.scenes)) return res.status(400).json({ error: 'scenes requis' });
   const knownIds = new Set((p.scenes || []).map((s) => s.id));
+  const characters = Array.isArray(b.characters)
+    ? b.characters.map((c) => ({
+        id: c.id || newId('ch'),
+        name: String(c.name || 'Personnage').slice(0, 60),
+        voiceId: String(c.voiceId || 'fr-FR-DeniseNeural'),
+      }))
+    : p.characters || [];
+  const characterIds = new Set(characters.map((c) => c.id));
+  for (const s of b.scenes) {
+    if (s.characterId && !characterIds.has(s.characterId)) {
+      return res.status(400).json({ error: 'Personnage inconnu : ' + s.characterId });
+    }
+  }
   const scenes = b.scenes.map((s, i) => {
     const base = knownIds.has(s.id) ? p.scenes.find((x) => x.id === s.id) : null;
     return {
       id: s.id || newId('sc'),
       image: s.image || (base && base.image) || (p.images[0] && p.images[0].file) || null,
       crop: s.crop || (base && base.crop) || null,
-      dialogue: String(s.dialogue || (base && base.dialogue) || ''),
-      characterId: s.characterId || (base && base.characterId) || null,
+      dialogue: String(s.dialogue !== undefined ? s.dialogue : (base && base.dialogue) || ''),
+      characterId: s.characterId !== undefined ? s.characterId || null : (base && base.characterId) || null,
+      ocrConfidence: s.ocrConfidence !== undefined ? s.ocrConfidence : (base && base.ocrConfidence) || null,
       voiceId: s.voiceId || (base && base.voiceId) || 'fr-FR-DeniseNeural',
       motion: s.motion || (base && base.motion) || null,
       durationOverride: Number(s.durationOverride) > 0 ? Number(s.durationOverride) : null,
-      kind: s.kind || (base && base.kind) || (String(s.dialogue || '').trim() ? 'dialogue' : 'ambiance'),
+      kind: String(s.dialogue !== undefined ? s.dialogue : (base && base.dialogue) || '').trim() ? 'dialogue' : 'ambiance',
       generated: (base && base.generated) || null,
       _order: i,
     };
   });
   p.scenes = scenes;
-  if (Array.isArray(b.characters)) p.characters = b.characters;
+  p.characters = characters;
   saveProject(p);
   res.json(p);
 });
@@ -218,14 +232,17 @@ api.put('/projects/:id/storyboard', requireProject, (req, res) => {
 // ---- Voix ----
 
 api.get('/voices', (req, res) => res.json(FRENCH_VOICES));
+api.get('/tts', (req, res) => res.json(ttsConfig()));
 
 api.post('/projects/:id/voice-preview', requireProject, (req, res) => {
   const text = String((req.body && req.body.text) || '').trim();
   const voiceId = (req.body && req.body.voiceId) || 'fr-FR-DeniseNeural';
   if (!text) return res.status(400).json({ error: 'texte requis' });
-  const out = path.join(TMP_DIR, newId('prev') + '.mp3');
-  synthesize(text.slice(0, 300), voiceId, out)
-    .then(() => res.sendFile(path.resolve(out)))
+  const prevId = newId('prev');
+  synthesize(text.slice(0, 300), voiceId, null, {
+    pathFor: (provider) => voiceFilePath(TMP_DIR, voiceId, prevId, provider),
+  })
+    .then((r) => res.set('X-Voice-Source', r.source).sendFile(path.resolve(r.path)))
     .catch((e) => res.status(503).json({ error: e.message }));
 });
 

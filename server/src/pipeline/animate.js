@@ -14,8 +14,10 @@ function clamp01(v) {
   return Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0));
 }
 
-// Recadrage normalise (cx, cy, cw, ch en fractions de l'image source)
-// puis mise au format cible en "cover" (pas de deformation).
+// Recadrage normalise (cx, cy, cw, ch en fractions de l'image source) puis mise
+// au format cible. Si la case a des proportions proches du format, elle remplit
+// l'image ("cover") ; sinon elle est montree ENTIERE, centree sur un fond flou
+// issu du meme dessin, pour que ni la bulle ni le dessin ne soient coupes.
 export async function prepareSceneImage(srcPath, crop, format, outPath) {
   const f = FORMATS[format] || FORMATS['9:16'];
   let pipeline = sharp(srcPath).rotate();
@@ -33,8 +35,30 @@ export async function prepareSceneImage(srcPath, crop, format, outPath) {
     height = Math.min(height, meta.height - top);
     pipeline = pipeline.extract({ left, top, width, height });
   }
-  await pipeline
+  let cropped = await pipeline.png().toBuffer();
+  // Les marges blanches (gouttieres) incluses dans la case sont retirees.
+  const corner = await sharp(cropped).extract({ left: 0, top: 0, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+  if (corner[0] > 245 && corner[1] > 245 && corner[2] > 245) {
+    try {
+      cropped = await sharp(cropped).trim({ background: '#ffffff', threshold: 12 }).png().toBuffer();
+    } catch {
+      /* image entierement blanche : on garde le recadrage tel quel */
+    }
+  }
+  const cm = await sharp(cropped).metadata();
+  const ratio = cm.width / cm.height / (f.w / f.h);
+  if (ratio > 0.8 && ratio < 1.25) {
+    await sharp(cropped).resize(f.w, f.h, { fit: 'cover', position: 'centre' }).jpeg({ quality: 92 }).toFile(outPath);
+    return outPath;
+  }
+  const bg = await sharp(cropped)
     .resize(f.w, f.h, { fit: 'cover', position: 'centre' })
+    .blur(28)
+    .modulate({ brightness: 0.55 })
+    .toBuffer();
+  const fg = await sharp(cropped).resize(f.w, f.h, { fit: 'inside' }).toBuffer();
+  await sharp(bg)
+    .composite([{ input: fg, gravity: 'centre' }])
     .jpeg({ quality: 92 })
     .toFile(outPath);
   return outPath;
@@ -49,15 +73,15 @@ export function motionFilter(kind, duration, f) {
   const cy = 'ih/2-(ih/zoom/2)';
   switch (kind) {
     case 'zoom-in':
-      return `zoompan=z='min(zoom+0.0015,1.30)':x='${cx}':y='${cy}':d=${frames}:s=${size}:fps=${fps}`;
+      return `zoompan=z='min(zoom+0.0006,1.15)':x='${cx}':y='${cy}':d=${frames}:s=${size}:fps=${fps}`;
     case 'zoom-out':
-      return `zoompan=z='if(lte(on,1),1.30,max(1.30-0.0015*on,1.001))':x='${cx}':y='${cy}':d=${frames}:s=${size}:fps=${fps}`;
+      return `zoompan=z='if(lte(on,1),1.15,max(1.15-0.0006*on,1.001))':x='${cx}':y='${cy}':d=${frames}:s=${size}:fps=${fps}`;
     case 'pan-left':
-      return `zoompan=z='1.25':x='(iw-iw/zoom)*(1-on/${frames})':y='${cy}':d=${frames}:s=${size}:fps=${fps}`;
+      return `zoompan=z='1.12':x='(iw-iw/zoom)*(1-on/${frames})':y='${cy}':d=${frames}:s=${size}:fps=${fps}`;
     case 'pan-right':
-      return `zoompan=z='1.25':x='(iw-iw/zoom)*(on/${frames})':y='${cy}':d=${frames}:s=${size}:fps=${fps}`;
+      return `zoompan=z='1.12':x='(iw-iw/zoom)*(on/${frames})':y='${cy}':d=${frames}:s=${size}:fps=${fps}`;
     case 'ken-burns':
-      return `zoompan=z='min(zoom+0.0012,1.22)':x='(iw-iw/zoom)*(on/${frames})':y='(ih-ih/zoom)*(on/${frames})':d=${frames}:s=${size}:fps=${fps}`;
+      return `zoompan=z='min(zoom+0.0005,1.12)':x='(iw-iw/zoom)*(on/${frames})':y='(ih-ih/zoom)*(on/${frames})':d=${frames}:s=${size}:fps=${fps}`;
     default:
       return null; // 'static'
   }
