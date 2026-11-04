@@ -61,6 +61,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Demo avec voix neuronales Edge (informatif, reseau Microsoft requis)
+        id: edge
         continue-on-error: true
         env:
           TTS_PROVIDER: edge
@@ -78,3 +79,10 @@ jobs:
             e2e-out/edge/manifest.json
           if-no-files-found: ignore
           retention-days: 14
+      - name: Resume voix Edge
+        if: always()
+        run: |
+          echo "## Voix neuronales Edge (informatif)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Resultat : **${{ steps.edge.outcome }}**. Hors de ce resultat, la validation de la demo repose sur la voix locale eSpeak." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.edge.outcome }}" != "success" ]; then echo "::warning::Voix Edge non verifiee : endpoint Microsoft injoignable ou refuse depuis ce runner."; fi
